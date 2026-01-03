@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Inventory Scanner</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#ffffff" />
+  <style>
+    :root{
+      --bg:#f6f6f6; --card:#fff; --ink:#111; --muted:#666;
+      --danger:#b30000; --ok:#0b6e2b; --line:#ddd;
+      --btn:#111; --btnInk:#fff;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+    body{margin:0;background:var(--bg);color:var(--ink)}
+    header{
+      position:sticky;top:0;z-index:5;
+      background:#fff;border-bottom:1px solid var(--line);
+      padding:12px 14px;
+    }
+    h1{font-size:18px;margin:0}
+    .wrap{padding:14px;max-width:980px;margin:0 auto}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .card{
+      background:var(--card);border:1px solid var(--line);
+      border-radius:14px;padding:12px;
+      box-shadow:0 1px 0 rgba(0,0,0,.03);
+    }
+    .card.danger{background:var(--danger);color:#fff;border-color:#7a0000}
+    .card.danger .muted{color:#ffecec}
+    label{font-size:12px;color:var(--muted)}
+    input,select{
+      width:100%;padding:12px 12px;border:1px solid var(--line);
+      border-radius:12px;font-size:16px;background:#fff;
+    }
+    .field{flex:1;min-width:180px}
+    .field.small{max-width:160px}
+    .field.tiny{max-width:120px}
+    button{
+      border:0;border-radius:12px;padding:12px 14px;
+      font-size:16px;font-weight:600;cursor:pointer;
+      background:var(--btn);color:var(--btnInk);
+    }
+    button.secondary{background:#444}
+    button.danger{background:var(--danger)}
+    button.ok{background:var(--ok)}
+    .muted{color:var(--muted)}
+    .spacer{height:10px}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media (min-width: 860px){ .grid{grid-template-columns:1fr 1fr} }
+    .pill{
+      display:inline-block;padding:4px 10px;border-radius:999px;
+      background:#eee;font-size:12px;font-weight:700;margin-left:8px
+    }
+    .pill.danger{background:#ffd6d6;color:#7a0000}
+    .pill.ok{background:#d7ffe3;color:#0b6e2b}
+    .list .item{margin-top:10px}
+    .hint{font-size:13px}
+    .hr{height:1px;background:var(--line);margin:12px 0}
+    .two{display:grid;grid-template-columns:1fr;gap:10px}
+    @media (min-width: 620px){ .two{grid-template-columns:1fr 1fr} }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Inventory Scanner <span class="pill" id="apiStatus">API</span></h1>
+  <div class="hint muted">Scan a SKU → press Enter (or tap Lookup). Use big buttons for IN/OUT/SET. Add items as you build inventory.</div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label>User (saved on this device)</label>
+        <input id="user" placeholder="e.g., Mech / Captain / Tech" />
+      </div>
+      <div style="display:flex;gap:10px;align-items:end">
+        <button id="saveUser" class="secondary">Save</button>
+        <button id="ping" class="secondary">Ping API</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label>Scan / Enter SKU</label>
+        <input id="sku" inputmode="none" autocomplete="off" autofocus placeholder="Scan barcode..." />
+      </div>
+      <div style="display:flex;gap:10px;align-items:end">
+        <button id="lookup">Lookup</button>
+        <button id="clear" class="secondary">Clear</button>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="row">
+      <div class="field tiny">
+        <label>Qty</label>
+        <input id="qty" type="number" value="1" min="1" />
+      </div>
+      <div class="field">
+        <label>Note (optional)</label>
+        <input id="note" placeholder="e.g., job #, batch, reason..." />
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="row">
+      <button id="btnOut" class="danger">Use (OUT)</button>
+      <button id="btnIn" class="ok">Receive (IN)</button>
+      <button id="btnAdj" class="secondary">Adjust (SET)</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div id="item"></div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <b>Low Stock</b>
+          <div class="muted hint">Auto-built from the sheet (OnHand ≤ Min)</div>
+        </div>
+        <button id="low">Refresh</button>
+      </div>
+      <div id="lowList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <b>Add / Update Item</b>
+      <div class="muted hint">Use this to build your inventory quickly. SKU can be scanned first.</div>
+
+      <div class="spacer"></div>
+
+      <div class="two">
+        <div class="field">
+          <label>SKU</label>
+          <input id="newSku" placeholder="Scan or type SKU" />
+        </div>
+        <div class="field">
+          <label>Name</label>
+          <input id="newName" placeholder="e.g., Horween Football Brown 8oz" />
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <label>Category</label>
+          <input id="newCategory" placeholder="Leather / Hardware / Thread / Tools" />
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <input id="newUnit" placeholder="pcs / ft / yd / bottle" />
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <label>OnHand</label>
+          <input id="newOnHand" type="number" value="0" />
+        </div>
+        <div class="field">
+          <label>Min</label>
+          <input id="newMin" type="number" value="0" />
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <label>ReorderQty</label>
+          <input id="newReorderQty" type="number" value="0" />
+        </div>
+        <div class="field">
+          <label>LeadTimeDays</label>
+          <input id="newLeadTimeDays" type="number" value="0" />
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <label>Vendor</label>
+          <input id="newVendor" placeholder="Weaver / Springfield / Amazon / etc" />
+        </div>
+        <div class="field">
+          <label>User</label>
+          <input id="newUser" placeholder="auto from saved User" />
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+      <div class="row">
+        <button id="saveItem" class="ok">Save Item</button>
+        <button id="fillFromLookup" class="secondary">Fill from Lookup</button>
+      </div>
+
+      <div id="saveMsg" class="muted hint" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
