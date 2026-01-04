@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Open Orders + Needs</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="nav">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="brand-badge"></div>
+          <h1>Open Orders + Needs</h1>
+        </div>
+        <div class="tabs">
+          <a class="tab" href="/workorders.html">Work Orders</a>
+          <a class="tab" href="/inventory.html">Inventory</a>
+          <a class="tab" href="/open-orders.html">Open Orders + Needs</a>
+        </div>
+      </div>
+      <div class="right">
+        <a class="tab" href="/index.html">Home</a>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container grid two">
+    <div class="card">
+      <h2>Shortage Summary (what you’re short on)</h2>
+      <small class="muted">Shortage uses Available = OnHand − Allocated</small>
+      <div style="overflow:auto;margin-top:10px">
+        <table class="table" id="shortTable">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>OnHand</th>
+              <th>Allocated</th>
+              <th>Available</th>
+              <th>Short By</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Open Orders</h2>
+      <small class="muted">Shows each order and everything required from inventory (BOM × qty)</small>
+      <div style="overflow:auto;margin-top:10px">
+        <table class="table" id="ordersTable">
+          <thead>
+            <tr>
+              <th>WO</th>
+              <th>Product</th>
+              <th>Status</th>
+              <th>Qty</th>
+              <th>Needs</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { setActiveTab, toast, loadInventory, loadWorkOrders, buildBomCache, computeAllocations, unpackWoMeta } from "/assets/app.js";
+
+    setActiveTab("/open-orders.html");
+
+    const $ = (id)=>document.getElementById(id);
+
+    async function render(){
+      const inv = await loadInventory();
+      const invMap = new Map(inv.map(i => [i.sku, i]));
+      const wos = (await loadWorkOrders())
+        .filter(wo => ["NEW","IN PROGRESS","BUILT"].includes(String(wo.status||"").toUpperCase()));
+
+      const bomCache = await buildBomCache(wos);
+      const { skuAlloc, orderNeeds } = computeAllocations(wos, bomCache);
+
+      // --- Shortage table
+      const shortages = [];
+      for (const [sku, allocated] of Object.entries(skuAlloc)) {
+        const item = invMap.get(sku);
+        const onHand = Number(item?.onHand || 0);
+        const available = onHand - Number(allocated || 0);
+        if (available < 0) {
+          shortages.push({
+            sku,
+            name: item?.name || "(missing SKU in inventory sheet)",
+            onHand,
+            allocated:Number(allocated||0),
+            available,
+            shortBy: Math.abs(available)
+          });
+        }
+      }
+
+      const shortBody = document.querySelector("#shortTable tbody");
+      shortBody.innerHTML = "";
+      shortages
+        .sort((a,b)=> b.shortBy - a.shortBy)
+        .forEach(s=>{
+          const tr = document.createElement("tr");
+          tr.classList.add("highlight-bad");
+          tr.innerHTML = `
+            <td><b>${esc(s.sku)}</b></td>
+            <td>${esc(s.name)}</td>
+            <td>${fmt(s.onHand)}</td>
+            <td>${fmt(s.allocated)}</td>
+            <td><b>${fmt(s.available)}</b></td>
+            <td><b>${fmt(s.shortBy)}</b></td>
+          `;
+          shortBody.appendChild(tr);
+        });
+
+      if (shortages.length === 0) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="6" class="muted">No shortages detected.</td>`;
+        shortBody.appendChild(tr);
+      }
+
+      // --- Orders table
+      const oBody = document.querySelector("#ordersTable tbody");
+      oBody.innerHTML = "";
+      wos.forEach(wo=>{
+        const needs = orderNeeds[wo.woId] || [];
+        const meta = unpackWoMeta(wo.notes || "");
+        const headerBits = [];
+        if (meta.orderNo) headerBits.push(`#${meta.orderNo}`);
+        if (meta.dueDate) headerBits.push(`Due ${meta.dueDate}`);
+        if (meta.shipDate) headerBits.push(`Ship ${meta.shipDate}`);
+        if (meta.personalization) headerBits.push(`P: ${meta.personalization}`);
+
+        const needsHtml = needs.map(n=>{
+          const item = invMap.get(n.sku);
+          const name = item?.name || "";
+          return `<div><b>${esc(n.sku)}</b> — ${esc(name)} <span class="muted">x ${fmt(n.qty)}</span></div>`;
+        }).join("");
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b>${esc(wo.woId)}</b><div class="muted">${esc(headerBits.join(" • "))}</div></td>
+          <td>${esc(wo.productName || wo.productId)}</td>
+          <td>${badge(wo.status)}</td>
+          <td>${esc(String(wo.qty||""))}</td>
+          <td>${needsHtml || '<span class="muted">—</span>'}</td>
+        `;
+        oBody.appendChild(tr);
+      });
+
+      if (wos.length === 0) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="5" class="muted">No open work orders.</td>`;
+        oBody.appendChild(tr);
+      }
+    }
+
+    $("refresh").onclick = ()=>render().catch(e=>toast(e.message));
+
+    function badge(status){
+      status = String(status||"").toUpperCase();
+      if (status === "NEW") return `<span class="badge">NEW</span>`;
+      if (status === "IN PROGRESS") return `<span class="badge warn">IN PROGRESS</span>`;
+      if (status === "BUILT") return `<span class="badge ok">BUILT</span>`;
+      return `<span class="badge">${esc(status)}</span>`;
+    }
+
+    function fmt(n){
+      const x = Number(n);
+      if (!Number.isFinite(x)) return String(n ?? "");
+      return x.toLocaleString(undefined,{maximumFractionDigits:4});
+    }
+    function esc(s){
+      return String(s||"")
+        .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    }
+
+    await render();
+  </script>
+</body>
+</html>
