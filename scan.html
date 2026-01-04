@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Scanner</title>
+  <style>
+    body{font-family:system-ui;margin:16px;max-width:680px}
+    input{width:100%;font-size:18px;padding:12px}
+    button{font-size:16px;padding:10px 14px;margin:6px 6px 0 0}
+    .card{border:1px solid #ddd;border-radius:12px;padding:12px;margin-top:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .muted{color:#666}
+    pre{white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <h2>Scan</h2>
+  <div class="muted">Scan codes like <b>SKU:AMZ-B0D2ZBTMHT</b> or <b>PROD:MASK-G1-BLK-BACKSTRAP</b></div>
+  <input id="scan" placeholder="Scan barcode/QR…" autocomplete="off" autofocus />
+  <div id="out" class="card"><div class="muted">Waiting for scan…</div></div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxGBX9uDy17GKUPLkY_qGpgyOFnc3LgLDLrdpQaHqYaPKFLoQIjKxvpcTcUGnvXiXhx1Q/exec";
+
+const $ = (id)=>document.getElementById(id);
+const out = (html)=>$("out").innerHTML = html;
+
+async function apiGet(params){
+  const url = SCRIPT_URL + "?" + new URLSearchParams(params).toString();
+  const r = await fetch(url);
+  return r.json();
+}
+async function apiPost(body){
+  const r = await fetch(SCRIPT_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  return r.json();
+}
+function promptNumber(label, def=1){
+  const v = prompt(label, String(def));
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+$("scan").addEventListener("keydown", async (e)=>{
+  if (e.key !== "Enter") return;
+  const raw = $("scan").value.trim();
+  $("scan").value = "";
+  if (!raw) return;
+
+  const s = raw.replace(/\s+/g,"");
+  try{
+    if (s.startsWith("SKU:")){
+      const sku = s.slice(4);
+      out(`<b>SKU</b>: ${sku}<div class="muted">Loading…</div>`);
+      const data = await apiGet({action:"lookup", sku});
+      if (!data.ok) return out(`<b>Error</b>: ${data.error}`);
+
+      const item = data.item;
+      out(`
+        <b>${item.Name}</b>
+        <div class="muted">${item.SKU} • OnHand: ${item.OnHand} • Min: ${item.Min}</div>
+        <div class="row">
+          <button id="add">Add</button>
+          <button id="rem">Remove</button>
+        </div>
+      `);
+
+      $("add").onclick = async ()=>{
+        const qty = promptNumber("Add how many?", 1); if (!qty) return;
+        const res = await apiPost({action:"move", sku, qty, type:"IN", user:"scanner"});
+        out(res.ok ? `<b>Added.</b> ${sku} now ${res.after}` : `<b>Error</b>: ${res.error}`);
+      };
+      $("rem").onclick = async ()=>{
+        const qty = promptNumber("Remove how many?", 1); if (!qty) return;
+        const res = await apiPost({action:"move", sku, qty, type:"OUT", user:"scanner"});
+        out(res.ok ? `<b>Removed.</b> ${sku} now ${res.after}` : `<b>Error</b>: ${res.error}`);
+      };
+      return;
+    }
+
+    if (s.startsWith("PROD:")){
+      const productId = s.slice(5);
+      // For this system, PROD scan creates a NEW work order (no inventory consumed yet)
+      const qty = promptNumber(`Create work order for ${productId} qty?`, 1);
+      if (!qty) return out(`<div class="muted">Cancelled.</div>`);
+
+      // Check if product needs thread color (optional at creation; you can leave blank)
+      const p = await apiGet({action:"product", productId});
+      if (!p.ok) return out(`<b>Error</b>: ${p.error}`);
+
+      let threadColor = "";
+      if (p.needsThreadColor) {
+        threadColor = prompt(`Thread color now? (optional) ${p.threadColorOptions.join(", ")}`, "");
+        if (threadColor == null) return out(`<div class="muted">Cancelled.</div>`);
+      }
+
+      const res = await apiPost({action:"workorderCreate", productId, qty, threadColor, user:"scanner"});
+      out(res.ok ? `<b>Work Order Created.</b> ${res.workOrderId} (${productId} x${qty})` : `<b>Error</b>: ${res.error}<pre>${JSON.stringify(res,null,2)}</pre>`);
+      return;
+    }
+
+    out(`<b>Unknown code</b>: ${raw}<div class="muted">Use SKU:... or PROD:...</div>`);
+  }catch(err){
+    out(`<b>Error</b>: ${String(err)}`);
+  }
+});
+</script>
+</body>
+</html>
