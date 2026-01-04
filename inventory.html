@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Inventory</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="nav">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="brand-badge"></div>
+          <h1>Inventory</h1>
+        </div>
+        <div class="tabs">
+          <a class="tab" href="/workorders.html">Work Orders</a>
+          <a class="tab" href="/inventory.html">Inventory</a>
+          <a class="tab" href="/open-orders.html">Open Orders + Needs</a>
+        </div>
+      </div>
+      <div class="right">
+        <a class="tab" href="/index.html">Home</a>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container grid two">
+    <div class="card">
+      <h2>Adjust Inventory</h2>
+      <small class="muted">Use this for receiving shipments or manual corrections. Work Orders consume inventory only when complete.</small>
+      <hr />
+      <div class="row">
+        <div class="field">
+          <label>SKU</label>
+          <input id="sku" placeholder="AMZ-..." />
+        </div>
+        <div class="field" style="max-width:160px">
+          <label>Qty (+ add / - remove)</label>
+          <input id="qty" type="number" step="1" value="1" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Reason</label>
+        <input id="reason" placeholder="Received shipment / correction / etc" />
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button id="adjust">Apply Adjustment</button>
+      </div>
+
+      <hr />
+
+      <h2>Add New Inventory Item</h2>
+      <small class="muted">This requires backend patch (Option B). If you don’t patch, add items directly in the sheet.</small>
+      <div class="grid two" style="margin-top:10px">
+        <div class="field"><label>SKU</label><input id="n_sku"></div>
+        <div class="field"><label>Name</label><input id="n_name"></div>
+      </div>
+      <div class="grid three">
+        <div class="field"><label>Category</label><input id="n_category" placeholder="Hardware / Packing / Leather..."></div>
+        <div class="field"><label>Unit</label><input id="n_unit" placeholder="each / sqft / yard / ft"></div>
+        <div class="field"><label>PackSize</label><input id="n_pack" type="number" step="0.01"></div>
+      </div>
+      <div class="grid three">
+        <div class="field"><label>CostEach</label><input id="n_cost" type="number" step="0.01"></div>
+        <div class="field"><label>Vendor</label><input id="n_vendor"></div>
+        <div class="field"><label>Link</label><input id="n_link"></div>
+      </div>
+      <div class="grid three">
+        <div class="field"><label>OnHand</label><input id="n_onhand" type="number" step="0.01" value="0"></div>
+        <div class="field"><label>MinLevel</label><input id="n_min" type="number" step="0.01" value="0"></div>
+        <div class="field" style="display:flex;justify-content:flex-end;align-items:flex-end">
+          <button id="addItem" class="secondary">Add Item</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Inventory (On-hand + Allocated + Available)</h2>
+      </div>
+      <small class="muted">Allocated = total needed to complete open orders (NEW / IN PROGRESS / BUILT)</small>
+
+      <div style="overflow:auto;margin-top:10px">
+        <table class="table" id="table">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>OnHand</th>
+              <th>Allocated</th>
+              <th>Available</th>
+              <th>Min</th>
+              <th>Vendor</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { gas } from "/assets/api.js";
+    import { setActiveTab, toast, getWho, loadInventory, loadWorkOrders, buildBomCache, computeAllocations } from "/assets/app.js";
+
+    setActiveTab("/inventory.html");
+    const $ = (id)=>document.getElementById(id);
+
+    async function render(){
+      const inv = await loadInventory();
+      const wos = await loadWorkOrders();
+      const bomCache = await buildBomCache(wos);
+      const { skuAlloc } = computeAllocations(wos, bomCache);
+
+      const tbody = document.querySelector("#table tbody");
+      tbody.innerHTML = "";
+
+      inv.forEach(item=>{
+        const allocated = Number(skuAlloc[item.sku] || 0);
+        const onHand = Number(item.onHand || 0);
+        const available = onHand - allocated;
+        const min = Number(item.minLevel || 0);
+
+        const tr = document.createElement("tr");
+        if (available < 0) tr.classList.add("highlight-bad");
+        else if (min > 0 && available < min) tr.classList.add("highlight-warn");
+
+        tr.innerHTML = `
+          <td><b>${escapeHtml(item.sku)}</b></td>
+          <td>${escapeHtml(item.name || "")}<div class="muted">${escapeHtml(item.unit || "")}</div></td>
+          <td>${fmt(onHand)}</td>
+          <td>${fmt(allocated)}</td>
+          <td><b>${fmt(available)}</b></td>
+          <td>${fmt(min)}</td>
+          <td>${escapeHtml(item.vendor || "")}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    $("refresh").onclick = render;
+
+    $("adjust").onclick = async () => {
+      try{
+        const who = getWho();
+        const sku = $("sku").value.trim();
+        const qty = Number($("qty").value || 0);
+        const reason = $("reason").value.trim();
+        await gas("adjustInventory", { sku, qty, reason, who });
+        toast("Inventory updated.");
+        await render();
+      }catch(e){
+        toast(e.message);
+      }
+    };
+
+    $("addItem").onclick = async () => {
+      try{
+        const who = getWho();
+        const payload = {
+          who,
+          item: {
+            sku: $("n_sku").value.trim(),
+            name: $("n_name").value.trim(),
+            category: $("n_category").value.trim(),
+            unit: $("n_unit").value.trim(),
+            packSize: Number($("n_pack").value || 0),
+            costEach: Number($("n_cost").value || 0),
+            vendor: $("n_vendor").value.trim(),
+            link: $("n_link").value.trim(),
+            onHand: Number($("n_onhand").value || 0),
+            minLevel: Number($("n_min").value || 0),
+          }
+        };
+        await gas("upsertInventoryItem", payload); // requires backend patch
+        toast("Item added/updated.");
+        await render();
+      }catch(e){
+        toast("Add item failed (backend patch required): " + e.message);
+      }
+    };
+
+    function fmt(n){
+      if (n === "" || n == null) return "0";
+      const x = Number(n);
+      if (!Number.isFinite(x)) return String(n);
+      return x.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    }
+
+    function escapeHtml(s){
+      return String(s||"")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    await render();
+  </script>
+</body>
+</html>
