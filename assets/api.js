@@ -1,16 +1,13 @@
 // assets/api.js
-export const GAS_WEBAPP_URL =
-  "https://script.google.com/macros/s/AKfycbxGBX9uDy17GKUPLkY_qGpgyOFnc3LgLDLrdpQaHqYaPKFLoQIjKxvpcTcUGnvXiXhx1Q/exec";
+export const GAS_PROXY_URL = "/gas";
 
-// NOTE: Use text/plain to avoid CORS preflight (Apps Script web apps don't handle OPTIONS)
 export async function gas(action, payload = {}) {
-  const res = await fetch(GAS_WEBAPP_URL, {
+  const res = await fetch(GAS_PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, ...payload }),
   });
 
-  // If Google sends HTML (login page), JSON parse will fail
   const text = await res.text();
   let data = null;
   try { data = JSON.parse(text); } catch (_) {}
@@ -19,9 +16,7 @@ export async function gas(action, payload = {}) {
     const msg =
       (data && data.error) ? data.error :
       (!res.ok ? `HTTP ${res.status}` :
-      "Backend returned non-JSON (deployment/auth issue).");
-    // Helpful debugging:
-    // console.log(text);
+      "Backend returned non-JSON.");
     throw new Error(msg);
   }
   return data;
