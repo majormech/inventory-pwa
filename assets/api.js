@@ -1,4 +1,3 @@
-// assets/api.js
 export const GAS_PROXY_URL = "/gas";
 
 export async function gas(action, payload = {}) {
@@ -13,11 +12,7 @@ export async function gas(action, payload = {}) {
   try { data = JSON.parse(text); } catch (_) {}
 
   if (!data || data.ok !== true) {
-    const msg =
-      (data && data.error) ? data.error :
-      (!res.ok ? `HTTP ${res.status}` :
-      "Backend returned non-JSON.");
-    throw new Error(msg);
+    throw new Error((data && data.error) ? data.error : "Backend error");
   }
   return data;
 }
