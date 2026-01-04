@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Work Orders</title>
+  <style>
+    body{font-family:system-ui;margin:16px;max-width:900px}
+    input,select{font-size:16px;padding:10px;width:100%}
+    button{font-size:14px;padding:10px 12px;margin:6px 6px 0 0}
+    .grid{display:grid;grid-template-columns:1fr 120px;gap:10px}
+    .card{border:1px solid #ddd;border-radius:12px;padding:12px;margin-top:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .muted{color:#666}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #ccc;border-radius:999px;font-size:12px}
+    pre{white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <h2>Work Orders</h2>
+
+  <div class="card">
+    <div class="muted">Create a NEW work order (does not consume inventory until BUILT)</div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1">
+        <label class="muted">Product</label>
+        <select id="product"></select>
+      </div>
+      <div style="width:120px">
+        <label class="muted">Qty</label>
+        <input id="qty" type="number" min="1" value="1">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1">
+        <label class="muted">Thread color (only needed for backed/stitched items)</label>
+        <select id="thread">
+          <option value="">(blank)</option>
+          <option>BLACK</option><option>WHITE</option><option>RED</option><option>GREEN</option><option>PINK</option>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label class="muted">Note</label>
+        <input id="note" placeholder="optional note (etsy order, etc)">
+      </div>
+    </div>
+    <div class="row">
+      <button id="create">Create Work Order</button>
+      <span id="createMsg" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:14px">
+    <button data-status="NEW">Show NEW</button>
+    <button data-status="IN_PROGRESS">Show IN_PROGRESS</button>
+    <button data-status="BUILT">Show BUILT</button>
+    <button data-status="CANCELED">Show CANCELED</button>
+    <button id="refresh">Refresh</button>
+    <span id="statusLbl" class="pill">NEW</span>
+  </div>
+
+  <div id="list"></div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxGBX9uDy17GKUPLkY_qGpgyOFnc3LgLDLrdpQaHqYaPKFLoQIjKxvpcTcUGnvXiXhx1Q/exec";
+let currentStatus = "NEW";
+
+const $ = (id)=>document.getElementById(id);
+
+async function apiGet(params){
+  const url = SCRIPT_URL + "?" + new URLSearchParams(params).toString();
+  const r = await fetch(url);
+  return r.json();
+}
+async function apiPost(body){
+  const r = await fetch(SCRIPT_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  return r.json();
+}
+
+function esc(s){ return String(s||"").replace(/[&<>"]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+
+async function loadProducts(){
+  const data = await apiGet({action:"products"});
+  if (!data.ok) throw new Error(data.error || "Failed to load products");
+  const sel = $("product");
+  sel.innerHTML = "";
+  data.products.forEach(p=>{
+    const opt = document.createElement("option");
+    opt.value = p.productId;
+    opt.textContent = `${p.productId} — ${p.name}`;
+    sel.appendChild(opt);
+  });
+}
+
+async function refreshList(){
+  $("statusLbl").textContent = currentStatus;
+  $("list").innerHTML = `<div class="card"><div class="muted">Loading…</div></div>`;
+  const data = await apiGet({action:"workorders", status: currentStatus});
+  if (!data.ok) return $("list").innerHTML = `<div class="card"><b>Error</b>: ${esc(data.error)}</div>`;
+  if (!data.workOrders.length) return $("list").innerHTML = `<div class="card"><div class="muted">No work orders in ${currentStatus}</div></div>`;
+
+  $("list").innerHTML = data.workOrders.map(wo => `
+    <div class="card">
+      <div class="row">
+        <b>${esc(wo.workOrderId)}</b>
+        <span class="pill">${esc(wo.status)}</span>
+      </div>
+      <div>${esc(wo.productName)} <span class="muted">(${esc(wo.productId)})</span></div>
+      <div class="muted">Qty: ${wo.qty} • Thread: ${esc(wo.threadColor || "(blank)")} • Note: ${esc(wo.note || "")}</div>
+      <div class="row">
+        ${wo.status==="NEW" ? `<button onclick="startWO('${wo.workOrderId}')">Start</button>` : ``}
+        ${(wo.status==="NEW" || wo.status==="IN_PROGRESS") ? `<button onclick="completeWO('${wo.workOrderId}')">Complete (consume inventory)</button>` : ``}
+        ${(wo.status!=="BUILT" && wo.status!=="CANCELED") ? `<button onclick="cancelWO('${wo.workOrderId}')">Cancel</button>` : ``}
+      </div>
+      <div id="msg-${esc(wo.workOrderId)}" class="muted"></div>
+    </div>
+  `).join("");
+}
+
+window.startWO = async (id) => {
+  const el = document.getElementById(`msg-${id}`);
+  el.textContent = "Starting…";
+  const res = await apiPost({action:"workorderStart", workOrderId:id, user:"pwa"});
+  el.textContent = res.ok ? "Started." : `Error: ${res.error}`;
+  if (res.ok) refreshList();
+};
+
+window.completeWO = async (id) => {
+  const el = document.getElementById(`msg-${id}`);
+  el.textContent = "Completing… (this will consume inventory)";
+  // If thread color wasn't set, you can enter it now
+  const threadColor = prompt("Thread color (blank if not needed). If needed, enter: BLACK/WHITE/RED/GREEN/PINK", "");
+  if (threadColor === null) { el.textContent = "Cancelled."; return; }
+  const res = await apiPost({action:"workorderComplete", workOrderId:id, threadColor: threadColor.trim(), user:"pwa"});
+  if (!res.ok) {
+    el.innerHTML = `<b>Error:</b> ${esc(res.error)}<pre>${esc(JSON.stringify(res, null, 2))}</pre>`;
+  } else {
+    el.textContent = "BUILT. Inventory updated.";
+  }
+  refreshList();
+};
+
+window.cancelWO = async (id) => {
+  const el = document.getElementById(`msg-${id}`);
+  el.textContent = "Canceling…";
+  const res = await apiPost({action:"workorderCancel", workOrderId:id, user:"pwa"});
+  el.textContent = res.ok ? "Canceled." : `Error: ${res.error}`;
+  if (res.ok) refreshList();
+};
+
+document.querySelectorAll("button[data-status]").forEach(b=>{
+  b.addEventListener("click", ()=>{ currentStatus = b.dataset.status; refreshList(); });
+});
+$("refresh").addEventListener("click", refreshList);
+
+$("create").addEventListener("click", async ()=>{
+  $("createMsg").textContent = "Creating…";
+  const productId = $("product").value;
+  const qty = Number($("qty").value || 0);
+  const threadColor = $("thread").value;
+  const note = $("note").value;
+  const res = await apiPost({action:"workorderCreate", productId, qty, threadColor, note, user:"pwa"});
+  $("createMsg").textContent = res.ok ? `Created ${res.workOrderId}` : `Error: ${res.error}`;
+  if (res.ok) { $("note").value=""; refreshList(); }
+});
+
+(async ()=>{
+  try{
+    await loadProducts();
+    await refreshList();
+  }catch(err){
+    document.body.innerHTML += `<div class="card"><b>Startup error:</b> ${esc(err)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
