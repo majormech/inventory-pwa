@@ -2,7 +2,6 @@ export async function onRequest(context) {
   const GAS_URL =
     "https://script.google.com/macros/s/AKfycbxGBX9uDy17GKUPLkY_qGpgyOFnc3LgLDLrdpQaHqYaPKFLoQIjKxvpcTcUGnvXiXhx1Q/exec";
 
-  // Handle CORS preflight
   if (context.request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: cors_() });
   }
@@ -34,4 +33,3 @@ function cors_() {
     "Access-Control-Allow-Headers": "Content-Type"
   };
 }
-
