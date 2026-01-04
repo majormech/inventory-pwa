@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Work Orders</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="nav">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="brand-badge"></div>
+          <h1>Work Orders</h1>
+        </div>
+        <div class="tabs">
+          <a class="tab" href="/workorders.html">Work Orders</a>
+          <a class="tab" href="/inventory.html">Inventory</a>
+          <a class="tab" href="/open-orders.html">Open Orders + Needs</a>
+        </div>
+      </div>
+      <div class="right">
+        <a class="tab" href="/index.html">Home</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="container grid two">
+    <div class="card">
+      <h2>Create Work Order</h2>
+
+      <div class="row">
+        <div class="field">
+          <label>Product</label>
+          <select id="product"></select>
+        </div>
+        <div class="field" style="max-width:140px">
+          <label>Qty</label>
+          <input id="qty" type="number" min="1" value="1" />
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="grid two">
+        <div class="field">
+          <label>Order # (your internal)</label>
+          <input id="orderNo" placeholder="Etsy order # or internal #" />
+        </div>
+        <div class="field">
+          <label>Customer name</label>
+          <input id="customer" placeholder="Customer" />
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="field">
+          <label>Due date</label>
+          <input id="dueDate" type="date" />
+        </div>
+        <div class="field">
+          <label>Ship date</label>
+          <input id="shipDate" type="date" />
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="field">
+          <label>Personalization</label>
+          <input id="personalization" placeholder="Name / text / notes" />
+        </div>
+        <div class="field">
+          <label>Thread color</label>
+          <select id="threadColor">
+            <option value="">(default)</option>
+            <option>BLACK</option><option>WHITE</option><option>RED</option><option>PINK</option><option>GREEN</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="field">
+          <label>Backing / Stitching</label>
+          <select id="stitching">
+            <option value="none">None</option>
+            <option value="backing-stitching">Backing + Stitching</option>
+            <option value="backstrap">Back strap + Backing + Stitching</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Shipping info</label>
+          <input id="shippingInfo" placeholder="Address or shipping notes" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="notes" placeholder="Anything else..."></textarea>
+      </div>
+
+      <div class="row" style="justify-content:flex-end">
+        <button id="create">Create Work Order</button>
+      </div>
+
+      <div class="note" style="margin-top:10px">
+        Inventory will <b>NOT</b> decrease now. It will show as <b>Allocated/Pending</b> until you mark BUILT and click <b>Consume</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Open Work Orders</h2>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+      <small class="muted">Status flow: NEW → IN PROGRESS → BUILT → (Consume)</small>
+
+      <div style="overflow:auto;margin-top:10px">
+        <table class="table" id="table">
+          <thead>
+            <tr>
+              <th>WO</th>
+              <th>Product</th>
+              <th>Qty</th>
+              <th>Status</th>
+              <th>Details</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { gas } from "/assets/api.js";
+    import { setActiveTab, getWho, toast, packWoMeta, unpackWoMeta } from "/assets/app.js";
+
+    setActiveTab("/workorders.html");
+
+    const $ = (id)=>document.getElementById(id);
+
+    async function loadProducts(){
+      const data = await gas("listProducts");
+      const sel = $("product");
+      sel.innerHTML = "";
+      (data.products||[]).forEach(p=>{
+        const opt = document.createElement("option");
+        opt.value = p.productId;
+        opt.textContent = `${p.productId} — ${p.name}`;
+        sel.appendChild(opt);
+      });
+    }
+
+    function formatDetails(wo){
+      const meta = unpackWoMeta(wo.notes || "");
+      const parts = [];
+      if (meta.orderNo) parts.push(`<span class="badge"># ${escapeHtml(meta.orderNo)}</span>`);
+      if (meta.personalization) parts.push(`<span class="badge">P: ${escapeHtml(meta.personalization)}</span>`);
+      if (meta.stitching && meta.stitching !== "none") parts.push(`<span class="badge warn">${escapeHtml(meta.stitching)}</span>`);
+      if (meta.dueDate) parts.push(`<span class="badge">Due: ${escapeHtml(meta.dueDate)}</span>`);
+      if (meta.shipDate) parts.push(`<span class="badge">Ship: ${escapeHtml(meta.shipDate)}</span>`);
+      if (meta.threadColor) parts.push(`<span class="badge">Thread: ${escapeHtml(meta.threadColor)}</span>`);
+      return parts.join(" ");
+    }
+
+    function statusBadge(status){
+      status = String(status||"").toUpperCase();
+      if (status === "NEW") return `<span class="badge">NEW</span>`;
+      if (status === "IN PROGRESS") return `<span class="badge warn">IN PROGRESS</span>`;
+      if (status === "BUILT") return `<span class="badge ok">BUILT</span>`;
+      return `<span class="badge">${escapeHtml(status)}</span>`;
+    }
+
+    async function loadWOs(){
+      const data = await gas("listWorkOrders");
+      const tbody = document.querySelector("#table tbody");
+      tbody.innerHTML = "";
+
+      (data.workOrders||[])
+        .filter(wo => ["NEW","IN PROGRESS","BUILT"].includes(String(wo.status||"").toUpperCase()))
+        .sort((a,b)=> String(b.createdAt||"").localeCompare(String(a.createdAt||"")))
+        .forEach(wo=>{
+          const tr = document.createElement("tr");
+
+          const details = formatDetails(wo);
+          tr.innerHTML = `
+            <td>${escapeHtml(wo.woId)}</td>
+            <td>${escapeHtml(wo.productName || wo.productId)}</td>
+            <td>${escapeHtml(String(wo.qty||""))}</td>
+            <td>${statusBadge(wo.status)}</td>
+            <td>${details || '<span class="muted">—</span>'}</td>
+            <td>${renderActions(wo)}</td>
+          `;
+          tbody.appendChild(tr);
+
+          // hook up buttons
+          tr.querySelectorAll("button[data-action]").forEach(btn=>{
+            btn.onclick = ()=>handleAction(btn.dataset.action, wo);
+          });
+        });
+    }
+
+    function renderActions(wo){
+      const st = String(wo.status||"").toUpperCase();
+      const b1 = `<button class="secondary" data-action="progress">IN PROGRESS</button>`;
+      const b2 = `<button class="warn" data-action="built">BUILT</button>`;
+      const b3 = `<button class="good" data-action="consume">Consume</button>`;
+      if (st === "NEW") return b1;
+      if (st === "IN PROGRESS") return `${b2}`;
+      if (st === "BUILT") return `${b3}`;
+      return "";
+    }
+
+    async function handleAction(action, wo){
+      const who = getWho();
+
+      if (action === "progress") {
+        await gas("setWorkOrderStatus", { woId: wo.woId, status:"IN PROGRESS", who });
+        toast("Updated to IN PROGRESS");
+        await loadWOs();
+        return;
+      }
+
+      if (action === "built") {
+        await gas("setWorkOrderStatus", { woId: wo.woId, status:"BUILT", who });
+        toast("Updated to BUILT. Now you can Consume.");
+        await loadWOs();
+        return;
+      }
+
+      if (action === "consume") {
+        // if order has thread color stored in notes, pass it
+        const meta = unpackWoMeta(wo.notes || "");
+        const threadColor = meta.threadColor || "";
+        await gas("consumeWorkOrder", { woId: wo.woId, who, threadColor });
+        toast("Consumed inventory for this work order.");
+        // after consuming, you probably want it off the open list:
+        // you can optionally set status to CLOSED in backend later; for now it remains BUILT but inventory is consumed.
+        await loadWOs();
+        return;
+      }
+    }
+
+    $("create").onclick = async () => {
+      try{
+        const who = getWho();
+        const productId = $("product").value;
+        const qty = Number($("qty").value || 1);
+
+        const meta = {
+          orderNo: $("orderNo").value.trim(),
+          personalization: $("personalization").value.trim(),
+          stitching: $("stitching").value,
+          shippingInfo: $("shippingInfo").value.trim(),
+          dueDate: $("dueDate").value,
+          shipDate: $("shipDate").value,
+          threadColor: $("threadColor").value
+        };
+
+        const notesText = $("notes").value.trim();
+        const packed = packWoMeta(meta) + (notesText ? ("\n" + notesText) : "");
+
+        const customer = $("customer").value.trim();
+
+        const res = await gas("createWorkOrder", {
+          productId,
+          qty,
+          customer,
+          notes: packed,
+          who
+        });
+
+        toast(`Created ${res.woId}`);
+        $("orderNo").value = "";
+        $("customer").value = "";
+        $("personalization").value = "";
+        $("shippingInfo").value = "";
+        $("notes").value = "";
+        $("threadColor").value = "";
+        $("stitching").value = "none";
+        await loadWOs();
+      } catch(e){
+        toast(e.message);
+      }
+    };
+
+    $("refresh").onclick = loadWOs;
+
+    function escapeHtml(s){
+      return String(s||"")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    await loadProducts();
+    await loadWOs();
+  </script>
+</body>
+</html>
