@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>737Leather — Shop Ops</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="nav">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="brand-badge"></div>
+          <h1>737Leather — Shop Ops</h1>
+        </div>
+        <div class="tabs">
+          <a class="tab" href="/workorders.html">Work Orders</a>
+          <a class="tab" href="/inventory.html">Inventory</a>
+          <a class="tab" href="/open-orders.html">Open Orders + Needs</a>
+        </div>
+      </div>
+      <div class="right">
+        <input id="who" placeholder="Your name (optional)" style="width:220px" />
+        <button id="saveWho" class="secondary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid three">
+      <div class="card kpi">
+        <div class="muted">What this does</div>
+        <div class="num">Work Orders</div>
+        <div class="muted">Create orders, track status, consume inventory only when complete.</div>
+      </div>
+      <div class="card kpi">
+        <div class="muted">What this does</div>
+        <div class="num">Inventory</div>
+        <div class="muted">Shows On-hand + “Allocated/Pending” needed for open orders + Available.</div>
+      </div>
+      <div class="card kpi">
+        <div class="muted">What this does</div>
+        <div class="num">Needs</div>
+        <div class="muted">Shows what each open order needs and what you’re short on.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>First time setup</h2>
+      <div class="note">
+        Make sure your Google Sheet has been initialized by running <b>setupAll()</b> in Apps Script.
+        If your web app errors, confirm the deployment is current and public.
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { setActiveTab, getWho, setWho, toast } from "/assets/app.js";
+
+    setActiveTab("/index.html");
+
+    const who = document.getElementById("who");
+    const save = document.getElementById("saveWho");
+    who.value = getWho();
+
+    save.onclick = () => {
+      setWho(who.value);
+      toast("Saved.");
+    };
+  </script>
+</body>
+</html>
